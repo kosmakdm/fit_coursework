@@ -13,6 +13,8 @@
 #define DATA_PROCESSING_TYPE 4
 #define NOT_VALID_TYPE -1
 
+#define array_len(x)  (sizeof(x) / sizeof((x)[0]))
+
 typedef struct Command {
     char *name;
     int number_of_arguments;
@@ -56,10 +58,9 @@ char *delimiters = " ";
 typedef struct operation_result {
     int result_code;
     int type;
-    char *message;
 } operation_result;
 
-operation_result result(int code, int type, char *message);
+operation_result result(int code, int type);
 operation_result parse_commands(int argc, char **argv, command_with_args all_commands[]);
 bool should_process_this_row(const command_with_args *all_commands, int curr_row, int column_count, char row[105][101]);
 bool is_delimiter(char i);
@@ -68,14 +69,18 @@ int main(int argc, char **argv) {
     command_with_args all_commands[100] = {empty};
     operation_result result = parse_commands(argc, argv, all_commands);
 
-    if (result.result_code < 0) {
-        printf("%s", result.message);
+    if (result.result_code == EXIT_FAILURE) {
         return result.result_code;
     }
 
     char input[RSIZ] = { 0 };
     int curr_row = 1;
+    int real_row = 1;
+    int a_rows = 0;
     int number_of_columns = 0;
+    int renderColumns = 0; // amount of columns to render
+    int originalCols = 0;
+    int colsWithAcol = 0; //amount of columns before modifications, but with acols
     while (fgets(input, RSIZ, stdin)) {
         int column_count = 0;
         int i_column = 0;
@@ -97,8 +102,8 @@ int main(int argc, char **argv) {
         if (curr_row == 1) {
             number_of_columns = column_count;
         } else if (column_count != number_of_columns) {
-            printf("Row #%d contains %d columns, but should contain %d", curr_row, column_count, number_of_columns);
-            return -1;
+            fprintf(stderr, "Row #%d contains %d columns, but should contain %d", curr_row, column_count, number_of_columns);
+            return EXIT_FAILURE;
         }
 
         if (result.type == DATA_PROCESSING_TYPE) {
@@ -194,9 +199,135 @@ int main(int argc, char **argv) {
                 }
             }
             printf("%s", "\n");
+        } else if (result.type == EDIT_TABLE_TYPE) {
+            int command_index = 0;
+            command_with_args curr_cmd = all_commands[command_index];
+
+            if (curr_row == 1)
+            {
+                renderColumns = column_count;
+                originalCols = column_count;
+                colsWithAcol = column_count;
+            }
+
+            int renderThis = 1;
+            int emptyBeforeThis = 0;
+            while (curr_cmd.command.name != NULL) {
+                char *command_name = curr_cmd.command.name;
+                if (strcmp(command_name, "icol") == 0) {
+                    int col = atoi(curr_cmd.args[0]) - 1;
+                    if (col <= renderColumns) {
+                        if (curr_row == 1) {
+                            ++renderColumns;
+                        }
+
+                        for (int i = renderColumns; i > col; i--) {
+                            strcpy(row[i], row[i - 1]);
+                        }
+
+                        strcpy(row[col], "");
+                    }
+                }
+                else if (strcmp(command_name, "dcol") == 0) {
+                    int col = atoi(curr_cmd.args[0]) - 1;
+                    if (col < colsWithAcol) {
+                        // copy content
+                        for (int i = col; i <= colsWithAcol; ++i) {
+                            strcpy(row[i], row[i + 1]);
+                        }
+
+                        // decrease table length
+                        if (curr_row == 1) --renderColumns;
+                    }
+                }
+                else if (strcmp(command_name, "dcols") == 0) {
+                    int from = atoi(curr_cmd.args[0]) - 1;
+                    int to = atoi(curr_cmd.args[1]) - 1;
+
+                    if (from < colsWithAcol) {
+                        if (to >= colsWithAcol) {
+                            to = colsWithAcol - 1;
+                        }
+                        int removedCols = to - from + 1;
+
+                        for (int i = from; i <= column_count; ++i) {
+                            strcpy(row[i], row[i + removedCols]);
+                        }
+
+                        if (curr_row == 1) renderColumns -= removedCols;
+                    }
+                }
+                else if (strcmp(command_name, "acol") == 0) {
+                    if (curr_row == 1) {
+                        ++colsWithAcol;
+                        ++renderColumns;
+                    }
+                }
+                // row commands
+                if (strcmp(command_name, "irow") == 0) {
+                    int row_arg = atoi(curr_cmd.args[0]);
+
+                    if (row_arg >= real_row - emptyBeforeThis && row_arg <= real_row) {
+                        ++emptyBeforeThis;
+                        ++real_row;
+                    }
+                }
+                else if (strcmp(command_name, "drow") == 0) {
+                    int row_arg = atoi(curr_cmd.args[0]);
+                    if (row_arg >= real_row - emptyBeforeThis && row_arg < real_row) {
+                        --emptyBeforeThis;
+                        --real_row;
+                    }
+                    else if (row_arg == real_row) {
+                        renderThis = 0;
+                    }
+                }
+                else if (strcmp(command_name, "drows") == 0) {
+                    int row_arg_from = atoi(curr_cmd.args[0]);
+                    int row_arg_to = atoi(curr_cmd.args[1]);
+
+                    for (int i = row_arg_from; i <= row_arg_to; ++i) {
+                        if (i >= real_row - emptyBeforeThis && i < real_row) {
+                            --emptyBeforeThis;
+                            --real_row;
+                        }
+                        else if (i == real_row) {
+                            renderThis = 0;
+                        }
+                    }
+                } else if (strcmp(command_name, "arow") == 0 && curr_row == 1) {
+                    a_rows++;
+                }
+
+                command_index++;
+                curr_cmd = all_commands[command_index];
+            }
+            for (int i = 1; i <= emptyBeforeThis; ++i) {
+                for (int j = 0; j < renderColumns - 1; ++j) {
+                    printf("%c", delimiters[0]);
+                }
+                printf("\n");
+            }
+            if (renderThis) {
+                for (int i = 0; i < renderColumns; ++i) {
+                    if (i == renderColumns - 1) printf("%s", row[i]);
+                    else printf("%s%c", row[i], delimiters[0]);
+                }
+                printf("\n");
+            }
+
         }
 
+        real_row++;
         curr_row++;
+    }
+
+    for (int i = 1; i <= a_rows; ++i) {
+        for (int j = 1; j < renderColumns; ++j)
+        {
+            printf("%c", delimiters[0]);
+        }
+        printf("\n");
     }
 
 }
@@ -221,14 +352,15 @@ operation_result parse_commands(int argc, char **argv, command_with_args all_com
     // parse delimiter
     if (strcmp(argv[index], "-d") == 0) {
         if (argc < 3) {
-            return result(-1, NOT_VALID_TYPE, "-d argument doesn't contain delimiter.");
+            fprintf(stderr, "-d argument doesn't contain delimiter");
+            return result(EXIT_FAILURE, NOT_VALID_TYPE);
         }
         delimiters = argv[index + 1];
         index += 2;
     }
 
     if (index == argc) {
-        return result(0, NOT_VALID_TYPE, "Ok");
+        return result(EXIT_SUCCESS, NOT_VALID_TYPE);
     }
 
     int type = NOT_VALID_TYPE;
@@ -238,22 +370,21 @@ operation_result parse_commands(int argc, char **argv, command_with_args all_com
     command row_selection[] = {rows, beginswith, contains};
 
     char *cmd = argv[index];
-    for (int i = 0; i < sizeof(row_selection); i++) {
+    for (int i = 0; i < array_len(row_selection); i++) {
         command curr_cmd = row_selection[i];
         if (strcmp(curr_cmd.name, cmd) == 0) {
             index++;
             type = DATA_PROCESSING_TYPE;
 
             if (argc < index + curr_cmd.number_of_arguments) {
-                return result(-1, NOT_VALID_TYPE, "Too few arguments");
+                fprintf(stderr, "Command %s should contain %d arguments", cmd, curr_cmd.number_of_arguments);
+                return result(EXIT_FAILURE, NOT_VALID_TYPE);
             }
             char *args[2] = {0};
             for (int j = 0; j < curr_cmd.number_of_arguments; j++) {
                 args[j] = argv[index];
                 index++;
             }
-            char **test;
-            test = args;
             command_with_args row_cmd = {.command = curr_cmd, .args = {args[0], args[1]}};
             all_commands[1] = row_cmd;
             break;
@@ -261,18 +392,19 @@ operation_result parse_commands(int argc, char **argv, command_with_args all_com
     }
 
     if (index == argc) {
-        return result(0, NOT_VALID_TYPE, "Ok");
+        return result(EXIT_SUCCESS, NOT_VALID_TYPE);
     }
 
     cmd = argv[index];
-    for (int i = 0; i < sizeof(data_processing); i++) {
+    for (int i = 0; i < array_len(data_processing); i++) {
         command curr_cmd = data_processing[i];
         if (strcmp(curr_cmd.name, cmd) == 0) {
             index++;
             type = DATA_PROCESSING_TYPE;
 
             if (argc < index + curr_cmd.number_of_arguments) {
-                return result(-1, NOT_VALID_TYPE, "Too few arguments");
+                fprintf(stderr, "Command %s should contain %d arguments", cmd, curr_cmd.number_of_arguments);
+                return result(EXIT_FAILURE, NOT_VALID_TYPE);
             }
             char* args[2] = {0};
             for (int j = 0; j < curr_cmd.number_of_arguments; j++) {
@@ -285,11 +417,45 @@ operation_result parse_commands(int argc, char **argv, command_with_args all_com
         }
     }
 
-    if (type != NOT_VALID_TYPE) {
+    // at this point we checked if this run is in the data processing mode
+    // so we if it's steel not defined, we need to check if it's table edit commands
+    if (type == NOT_VALID_TYPE) {
+        int command_index = 0;
+        while (index < argc) {
+            cmd = argv[index];
+            bool cmd_found = false;
+            for (int i = 0; i < array_len(edit_commands); i++) {
+                command curr_cmd = edit_commands[i];
+                if (strcmp(curr_cmd.name, cmd) == 0) {
+                    index++;
+                    type = EDIT_TABLE_TYPE;
 
+                    if (argc < index + curr_cmd.number_of_arguments) {
+                        fprintf(stderr, "Command %s should contain %d arguments", cmd, curr_cmd.number_of_arguments);
+                        return result(EXIT_FAILURE, NOT_VALID_TYPE);
+                    }
+                    char* args[2] = {0};
+                    for (int j = 0; j < curr_cmd.number_of_arguments; j++) {
+                        args[j] = argv[index];
+                        index++;
+                    }
+                    command_with_args row_cmd = {.command = curr_cmd, .args = {args[0], args[1]}};
+                    all_commands[command_index] = row_cmd;
+                    command_index++;
+                    cmd_found = true;
+                    break;
+                }
+            }
+
+            if (!cmd_found) {
+                fprintf(stderr, "Command %s is not supported", cmd);
+                return result(EXIT_FAILURE, NOT_VALID_TYPE);
+            }
+
+        }
     }
 
-    return result(0, type, "OK");
+    return result(EXIT_SUCCESS, type);
 }
 
 bool is_delimiter(char i) {
@@ -301,10 +467,9 @@ bool is_delimiter(char i) {
     return false;
 }
 
-operation_result result(int code, int type, char *msg) {
+operation_result result(int code, int type) {
     operation_result result;
     result.result_code = code;
-    result.message = msg;
     result.type = type;
     return result;
 }

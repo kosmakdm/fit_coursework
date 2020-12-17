@@ -1,0 +1,14 @@
+Exercises: Point: Project
+First programs: 0:
+Cycle, types: 0:
+Chains: 0:
+Function 1: 0:
+Structures: 2:
+Indicators: 2:
+Function: 0: Defense 1
+Malloc, dbg: 2:
+: 0:
+: 0:
+Iteration, recursion: 2:
+: 0: Defense 2
+Dynamic structures: 2:
